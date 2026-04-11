@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Master Inquisitor – Epistemic Decider</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="bg-orbs"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
+  
+  <main class="container">
+    <div class="app-wrapper">
+      
+      <!-- ───────────── LEFT SIDE: CHAT ───────────── -->
+      <section id="game-container" class="glass-card">
+        
+        <!-- Intro Screen -->
+        <div id="screen-intro" class="screen active">
+          <div class="akinator-avatar"><span class="avatar-emoji">🧠</span></div>
+          <h1 class="title">Master <span class="gradient-text">Inquisitor</span></h1>
+          <p class="subtitle">Bayesian Inference Engine</p>
+          <p class="description">Aklında bir canlı tut. Epistemik entropiyi minimize ederek onu bulacağım.</p>
+          <button class="btn btn-primary" onclick="startGame()">Sorguyu Başlat</button>
+        </div>
+
+        <!-- Loading Screen -->
+        <div id="screen-loading" class="screen">
+          <div class="loader-terminal">
+            <div class="spinner"></div>
+            <p>Olasılık uzayı taranıyor...</p>
+          </div>
+        </div>
+
+        <!-- Game Screen -->
+        <div id="screen-game" class="screen">
+          <header class="game-header">
+            <div class="header-info">
+              <span class="status-dot"></span>
+              <span id="engine-status">Engine: Online</span>
+            </div>
+            <div class="q-chip">Soru #<span id="q-number">1</span></div>
+          </header>
+          <div class="chat-area" id="chat-area"></div>
+          <div class="answer-section" id="answer-section">
+            <div class="answer-buttons">
+              <button class="btn btn-ans btn-yes" onclick="sendAnswer('Evet')">Evet</button>
+              <button class="btn btn-ans btn-no" onclick="sendAnswer('Hayır')">Hayır</button>
+              <button class="btn btn-ans btn-dunno" onclick="sendAnswer('Bilmiyorum')">Belki</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Result Screen -->
+        <div id="screen-result" class="screen">
+          <h2 id="result-title">Entropi Sıfırlandı</h2>
+          <div class="result-box">
+             <p class="label">Belirlenen Varlık:</p>
+             <h4 id="result-profession">Hayvan</h4>
+          </div>
+          <p class="stats">Verim: <strong id="result-q-count">?</strong>/20 Soru</p>
+          <button class="btn btn-primary" onclick="startGame()">Yeni Sorgu</button>
+        </div>
+      </section>
+
+      <!-- ───────────── RIGHT SIDE: ENGINE REASONING (TERMINAL) ───────────── -->
+      <aside id="terminal-container" class="terminal-card">
+        <div class="terminal-header">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <div class="title">REASONING_LOG.EXE</div>
+        </div>
+        <div class="terminal-body" id="reasoning-area">
+          <div class="term-line">> System initialized.</div>
+          <div class="term-line">> Root level hierarchy active.</div>
+          <div class="term-line">> Awaiting target designation...</div>
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <div class="toast" id="toast"><span id="toast-msg"></span></div>
+  <script src="/static/game.js"></script>
+</body>
+</html>
