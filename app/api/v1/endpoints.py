@@ -1,59 +1,58 @@
+import json
 import uuid
-from fastapi import APIRouter, HTTPException, Query
-from app.models.schemas import AnswerRequest, GameResponse, StartResponse, ReasoningLog
-from app.services.llm_service import process_turn, clear_session
+from typing import AsyncGenerator
+
+from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
+
+from app.models.schemas import AnswerRequest, StartRequest
+from app.services.llm_service import clear_session, process_turn_stream
 
 router = APIRouter()
 
-
-def _check_errors(res: dict) -> None:
-    """Raise the appropriate HTTP error for error/rate_limited responses."""
-    if res.get("type") == "error":
-        raise HTTPException(status_code=500, detail=res.get("content"))
-    if res.get("type") == "rate_limited":
-        retry_after = int(res.get("retry_after", 60))
-        raise HTTPException(
-            status_code=503,
-            detail=f"Rate limit hit — retry after {retry_after}s",
-            headers={"Retry-After": str(retry_after)},
-        )
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 
 
-@router.post("/start", response_model=StartResponse)
-async def start_game(old_session_id: str = Query(None)):
-    if old_session_id:
-        clear_session(old_session_id)
-
-    session_id = str(uuid.uuid4())
-    res = await process_turn(session_id)
-    _check_errors(res)
-
-    raw_reasoning = res.get("reasoning")
-    reasoning = ReasoningLog(**raw_reasoning) if isinstance(raw_reasoning, dict) else None
-
-    return StartResponse(
-        session_id=session_id,
-        action=res.get("action", "ask_question"),
-        question=res.get("question", ""),
-        reasoning=reasoning,
-        turn=res.get("turn", 0),
+def _sse_response(generator: AsyncGenerator[str, None]) -> StreamingResponse:
+    return StreamingResponse(
+        generator,
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
     )
 
 
-@router.post("/ask", response_model=GameResponse)
+def _session_event(session_id: str) -> str:
+    payload = {"type": "session_id", "session_id": session_id}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@router.post("/start")
+async def start_game(request: StartRequest):
+    if request.old_session_id:
+        clear_session(request.old_session_id)
+
+    session_id = str(uuid.uuid4())
+
+    async def stream_generator() -> AsyncGenerator[str, None]:
+        yield _session_event(session_id)
+        async for chunk in process_turn_stream(session_id, language=request.lang):
+            yield chunk
+
+    return _sse_response(stream_generator())
+
+
+@router.post("/ask")
 async def ask_question(request: AnswerRequest, session_id: str = Query(...)):
-    res = await process_turn(session_id, request.user_answer)
-    _check_errors(res)
-
-    raw_reasoning = res.get("reasoning")
-    reasoning = ReasoningLog(**raw_reasoning) if isinstance(raw_reasoning, dict) else None
-
-    return GameResponse(
-        action=res.get("action", "ask_question"),
-        question=res.get("question"),
-        guess=res.get("guess"),
-        reasoning=reasoning,
-        turn=res.get("turn", 0),
+    return _sse_response(
+        process_turn_stream(
+            session_id,
+            user_answer=request.user_answer,
+            language=request.lang,
+        )
     )
 
 

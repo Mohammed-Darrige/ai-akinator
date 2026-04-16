@@ -1,60 +1,52 @@
+"""Schemas for the LLM-native Akinator backend."""
+
+from typing import Any, Dict, List, Optional, Tuple
+
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Set
 
 
-class BeliefState(BaseModel):
-    """
-    The authoritative typed belief state for a single game session.
-    All fields are updated server-side after every turn.
-    """
+class ConstraintLedger(BaseModel):
+    """Server-owned record of confirmed facts and resolved answers."""
+
+    facts: Dict[str, bool] = Field(default_factory=dict)
+    qa_history: List[Tuple[str, str]] = Field(default_factory=list)
+
+
+class GameState(BaseModel):
+    """Mutable session state managed by the backend."""
+
+    language: str = "tr"
     turn: int = 0
-    confirmed: Dict[str, bool] = Field(default_factory=dict)
-    candidate_scores: Dict[str, float] = Field(default_factory=dict)
-    eliminated_animals: List[str] = Field(default_factory=list)
-    asked_questions: List[str] = Field(default_factory=list)
-    last_question: Optional[str] = None
+    ledger: ConstraintLedger = Field(default_factory=ConstraintLedger)
+    conversation: List[Dict[str, str]] = Field(default_factory=list)
+    asked_traits: List[str] = Field(default_factory=list)
+    trait_labels: Dict[str, str] = Field(default_factory=dict)
     confidence: float = 0.0
-    top_candidate: Optional[str] = None
-    consecutive_unknowns: int = 0
+    top_candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    pending_guess: Optional[str] = None
+    last_trait_key: Optional[str] = None
+    last_question: Optional[str] = None
+    game_over: bool = False
+
+
+class StartRequest(BaseModel):
+    lang: str = "tr"
+    old_session_id: Optional[str] = None
 
 
 class AnswerRequest(BaseModel):
     user_answer: str
-
-
-class LLMTurnOutput(BaseModel):
-    """
-    Strict contract the LLM must return each turn.
-    Parsed and validated by the server — never trusted blindly.
-    """
-    reasoning: str
-    new_traits: Dict[str, bool] = Field(default_factory=dict)
-    eliminated_animals: List[str] = Field(default_factory=list)
-    action: str
-    question: Optional[str] = None
-    guess: Optional[str] = None
-    confidence: float = 0.0
-    candidates_remaining: int = 0
+    lang: str = "tr"
 
 
 class ReasoningLog(BaseModel):
-    analysis: str
-    strategy: str
-    confidence: float
-    candidates_remaining: int
+    """Reasoning payload sent back with each completed turn."""
 
-
-class GameResponse(BaseModel):
-    action: str
-    question: Optional[str] = None
-    guess: Optional[str] = None
-    reasoning: Optional[ReasoningLog] = None
-    turn: int = 0
-
-
-class StartResponse(BaseModel):
-    session_id: str
-    action: str
-    question: str
-    reasoning: Optional[ReasoningLog] = None
-    turn: int = 0
+    chain_of_thought: str = ""
+    confidence: float = 0.0
+    candidates_remaining: int = 0
+    constraints: Dict[str, bool] = Field(default_factory=dict)
+    qa_history: List[Tuple[str, str]] = Field(default_factory=list)
+    trait_labels: Dict[str, str] = Field(default_factory=dict)
+    top_candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    has_contradiction: bool = False
