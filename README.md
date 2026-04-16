@@ -12,7 +12,7 @@ FastAPI backend for an LLM-native animal guessing game.
 
 ## Environment
 
-Create a `.env` file in the repo root:
+Copy `.env.example` to `.env` and fill in your provider credentials:
 
 ```env
 LLM_API_KEY=your_api_key
@@ -28,3 +28,8 @@ uvicorn app.main:app --reload
 ```
 
 The API is exposed under `/api/v1`.
+
+## Notes
+
+- `.env` is local-only and ignored by git.
+- Default examples target Z.ai's OpenAI-compatible endpoint, but other compatible providers can be used.
