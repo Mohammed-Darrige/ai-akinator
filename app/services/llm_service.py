@@ -252,6 +252,9 @@ Non-negotiable rules:
 - Prefer concrete, distinguishing traits over broad survival traits.
 - If you are not confident enough to guess, ask a more discriminating question.
 - If you guess, the guess must satisfy every confirmed fact.
+- Restrict your candidate pool to common, well-known animals. Exclude rare species, specific regional breeds, and obscure mythical creatures (except Dragon, Phoenix, Unicorn, T-Rex).
+- Strongly favor high-entropy questions that eliminate roughly 50% of the remaining candidates. Do not ask questions that only eliminate 1 or 2 candidates.
+- Avoid low-information traits such as specific weights, body temperature, blood type, or overly broad continents (lives in Asia/Africa) unless absolutely necessary.
 - All visible text fields must be written entirely in {language_name}.
 - Return JSON only. Do not add markdown or prose outside the JSON object.
 
