@@ -1,0 +1,25 @@
+{
+  "name": "neural-akinator",
+  "version": "2.0.0",
+  "private": false,
+  "description": "Noise-tolerant Bayesian animal deduction engine with expected-information-gain question selection.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "evaluate": "tsx scripts/evaluate-akinator.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.38.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

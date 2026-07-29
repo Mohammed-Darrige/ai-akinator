@@ -1,7 +1,8 @@
 .env
-.venv/
-venv/
+.env.local
+node_modules/
+coverage/
+dist/
+*.tsbuildinfo
 __pycache__/
 *.pyc
-*.pyo
-.ruff_cache/

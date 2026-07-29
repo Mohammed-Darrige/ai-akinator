@@ -1,80 +1,117 @@
-# Neural Akinator: Dynamic Constraint & Decision Tree Engine
+# Neural Akinator
 
-An enterprise-grade, high-performance **Client-Server Hybrid AI Deduction Engine** designed to solve the classic 20-questions game with mathematical precision. Unlike naive LLM prompts that suffer from hallucinations and inconsistent logic, Neural Akinator combines **deterministic constraint logic**, **Shannon Entropy (Information Gain)**, and **LLM belief-state reasoning** into a unified inference architecture.
+A provider-independent, noise-tolerant animal deduction engine built with Bayesian inference, Shannon entropy, and expected information gain.
 
----
+The production engine powers the interactive AI Akinator experience in Mohammed Darrige's portfolio. This repository contains the same inference core, curated knowledge base, regression tests, and reproducible evaluation harness used by the live application.
 
-## 🚀 Architectural Overview & Engineering Philosophy
+## Results
 
-Modern LLMs struggle with multi-turn deductive reasoning when maintaining state over long conversation horizons. Neural Akinator solves this by decoupling **logical deduction** from **natural language generation**:
+- 115 curated living and extinct animal profiles
+- 70+ canonical questions with English, Turkish, and Arabic text
+- 115/115 catalog animals identified in deterministic simulation
+- 5/5 first-guess accuracy across the published easy/medium/hard evaluation
+- 5/5 first-guess accuracy when one plausible answer is `unknown`
+- 20 automated regression and knowledge-base invariant tests
+- No LLM or external provider in the live turn loop
 
-1. **Dynamic Constraint Ledger:** Maintains a structured belief state across 225+ candidate entities. Every user response (`Yes`, `No`, `I Don't Know`) applies an immutable mathematical filter to the candidate pool.
-2. **Information Gain Optimization (Shannon Entropy):** Before asking a question, the engine evaluates the candidate space and calculates the exact expected information gain (entropy reduction) for all possible traits, dynamically selecting the question that splits the remaining search space most efficiently (closest to a 50/50 split).
-3. **Hybrid Client-Server Validation:** Combines lightning-fast local tree pruning with server-side LLM validation and Server-Sent Events (SSE) streaming, ensuring zero latency spikes while eliminating logical contradictions and hallucinations.
-4. **Self-Learning Architecture:** Features an automated ingestion pipeline where new entities taught by users are analyzed, decomposed into boolean trait vectors, and merged into the canonical constraint ledger.
+## Architecture
 
----
+### Probabilistic belief state
 
-## 🛠️ Tech Stack & System Components
-
-- **Backend & Inference:** Python 3.10+, FastAPI, Pydantic v2, Uvicorn (Async SSE Streaming)
-- **Mathematical Engine:** Custom Shannon Entropy & Information Gain algorithm (Scipy / Numpy logic)
-- **LLM Integration:** OpenAI-compatible API bridge (Z.ai / GLM-5 / Groq / OpenAI) for natural language formatting and edge-case resolution
-- **Frontend Integration:** Next.js 16, React 19, TypeScript, Tailwind CSS, Framer Motion
-
----
-
-## 📦 Repository Structure
+Every candidate keeps non-zero posterior mass. User answers update the distribution through Bayes' rule:
 
 ```text
-├── app/
-│   ├── main.py              # FastAPI Application & SSE Streaming Routes
-│   ├── engine.py            # Core Deduction & Information Gain Mathematical Engine
-│   ├── ledger.py            # Dynamic 225-Animal Constraint Database & Trait Matrix
-│   └── models.py            # Pydantic Schemas & State Validators
-├── simulate_engine_logic.py # Offline mathematical verification & entropy simulation suite
-├── simulate_fixed_targets.py# Benchmark tests against fixed target paths
-├── test_game.py             # Automated end-to-end multi-turn regression tests
-└── requirements.txt         # Production dependencies
+P(animal | answers) proportional to
+P(animal) * product(P(answer | animal))
 ```
 
----
+Profiles use likelihoods rather than brittle hard elimination. Canonical positive traits use `0.97`, negatives use `0.03`, biologically variable traits use `0.68`, and the calibrated human-response channel uses `0.85` reliability. One mistaken answer therefore cannot permanently eliminate the correct animal.
 
-## ⚡ Quick Start (Local Development)
+### Question selection
 
-### 1. Clone & Install Dependencies
+For every unasked canonical question, the engine computes expected entropy reduction:
+
+```text
+IG = H(A) - P(yes) H(A | yes) - P(no) H(A | no)
+```
+
+The highest-scoring question is selected after clarity and useful-posterior-coverage adjustments. Canonical IDs prevent repeated or semantically duplicated questions across all three languages.
+
+### Dynamic guessing
+
+There is no arbitrary minimum question count. Guess timing depends on:
+
+- normalized top posterior probability
+- top-two posterior odds
+- effective candidate count, `2^entropy`
+- rejected canonical guesses
+- a 24-question safety bound
+
+Low information gain alone never authorizes a low-confidence guess. Rejected guesses receive negligible posterior mass and cannot repeat.
+
+### Open-world boundary
+
+The core game is deterministic and provider-independent. In the portfolio integration, an optional post-game adapter can validate an unknown animal and submit a canonical profile for moderation. New profiles remain `PENDING_REVIEW`; only approved profiles can enter the runtime catalog.
+
+## Repository Structure
+
+```text
+src/lib/server/
+  akinator-engine.ts          Bayesian inference and game policy
+  akinator-knowledge-base.ts Curated profiles and localized questions
+  akinator-open-world.ts     Optional bounded post-game provider adapter
+  db.ts                       Optional approved-profile persistence adapter
+tests/
+  akinator-engine.test.ts    Catalog-wide and noisy-answer regression suite
+scripts/
+  evaluate-akinator.ts       Reproducible five-target evaluation harness
+docs/
+  ai-akinator.md             Architecture and security model
+  ai-akinator-errors-ledger.md Retired defects and residual risks
+verification/akinator/
+  five-animal-evaluation.md  Full question-by-question audit
+```
+
+## Quick Start
+
 ```bash
-git clone https://github.com/Mohammed-Darrige/ai-akinator.git
-cd ai-akinator
-pip install -r requirements.txt
+npm install
+npm test
+npm run evaluate
+npm run typecheck
 ```
 
-### 2. Configure Environment
-Copy the example environment file and set your LLM provider credentials:
-```bash
-cp .env.example .env
-```
+No API key is required for inference or evaluation. Optional Upstash credentials are used only when embedding the engine with approved custom profiles:
+
 ```env
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=https://api.z.ai/api/coding/paas/v4
-LLM_MODEL_NAME=glm-5-turbo
+KV_REST_API_URL=https://your-upstash-instance
+KV_REST_API_TOKEN=your-token
 ```
 
-### 3. Launch Inference Server
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-The API endpoints and Swagger UI documentation will be available at `http://localhost:8000/docs`.
+## Evaluation Summary
 
----
+| Difficulty | Target | Questions | First guess | Wrong guesses |
+| --- | --- | ---: | --- | ---: |
+| Easy | Dog | 8 | Dog | 0 |
+| Easy | Duck | 7 | Duck | 0 |
+| Medium | Platypus | 8 | Platypus | 0 |
+| Medium | Chameleon | 8 | Chameleon | 0 |
+| Hard | Axolotl | 7 | Axolotl | 0 |
 
-## 🧪 Verification & Simulation Suite
+The committed report preserves the original audit transcript. Subsequent calibration retained 5/5 first-guess accuracy for truthful and unknown-answer runs while reducing wrong-answer stress-test guesses from five to two.
 
-To verify the mathematical correctness of the Shannon Entropy pruning without consuming LLM API tokens, run the included simulation suite:
-```bash
-python simulate_engine_logic.py
-python test_game.py
-```
+## Design Principles
 
----
-*Engineered by **Mohammed Darrige** — Fırat University AI & Data Engineering.*
+- Animalia-only domain boundary
+- deterministic core behavior
+- explicit uncertainty instead of missing-data guesses
+- normalized, inspectable probabilities
+- multilingual questions backed by one semantic ID
+- moderation before learned profiles become active
+- reproducible evaluation rather than anecdotal demos
+
+## License
+
+MIT. See `LICENSE`.
+
+Engineered by Mohammed Darrige, Fırat University AI & Data Engineering.
