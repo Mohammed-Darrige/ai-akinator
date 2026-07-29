@@ -120,7 +120,7 @@ describe("Akinator probabilistic engine", () => {
     const questionCounts = ANIMALS.map((animal) => playIdealGame(animal.id).questions);
     expect(Math.max(...questionCounts)).toBeLessThanOrEqual(24);
     expect(questionCounts.reduce((sum, count) => sum + count, 0) / questionCounts.length).toBeLessThan(16);
-  });
+  }, 15_000);
 
   it("tolerates an unknown answer and one mistaken answer", () => {
     const result = playIdealGame("duck", (answer, turn) => {

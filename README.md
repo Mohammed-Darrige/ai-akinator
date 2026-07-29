@@ -81,7 +81,7 @@ npm run evaluate
 npm run typecheck
 ```
 
-No API key is required for inference or evaluation. Optional Upstash credentials are used only when embedding the engine with approved custom profiles:
+No API key is required for inference or evaluation. When embedding the engine with signed stateless sessions, use a dedicated `AKINATOR_SESSION_SECRET` (32+ characters). Existing server-only Akinator provider credentials are accepted as a migration fallback, but a dedicated secret takes precedence. Optional Upstash credentials are used only when embedding the engine with approved custom profiles:
 
 ```env
 KV_REST_API_URL=https://your-upstash-instance

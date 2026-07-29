@@ -127,11 +127,27 @@ function parseAnswer(value: string): Answer | null {
 }
 
 function getSessionSecret() {
-  const secret = process.env.AKINATOR_SESSION_SECRET?.trim();
+  const secret = [
+    process.env.AKINATOR_SESSION_SECRET,
+    process.env.AKINATOR_CEREBRAS_API_KEY,
+    process.env.CEREBRAS_API_KEY,
+    process.env.AKINATOR_GROQ_API_KEY,
+    process.env.GROQ_API_KEY,
+    process.env.AKINATOR_SAMBANOVA_API_KEY,
+    process.env.SAMBANOVA_API_KEY,
+  ].find((candidate) => candidate?.trim().length && candidate.trim().length >= 32)?.trim();
   if (!secret || secret.length < 32) {
-    throw new Error("AKINATOR_SESSION_SECRET must contain at least 32 characters.");
+    throw new Error("Configure AKINATOR_SESSION_SECRET or a signing-capable Akinator provider credential.");
   }
   return secret;
+}
+
+export function hasSessionSigningSecret() {
+  try {
+    return Boolean(getSessionSecret());
+  } catch {
+    return false;
+  }
 }
 
 function signature(payload: string) {
