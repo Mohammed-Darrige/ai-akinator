@@ -30,7 +30,7 @@ export async function getCustomAnimals(includePending = false): Promise<CustomAn
   if (!redis) {
     return [];
   }
-
+  
   try {
     const [legacy, hash] = await Promise.all([
       redis.get<CustomAnimalSignature[]>(ANIMALS_KV_KEY),
@@ -55,7 +55,7 @@ export async function saveCustomAnimal(animal: CustomAnimalSignature): Promise<b
   if (!redis) {
     return false;
   }
-
+  
   try {
     return (await redis.hsetnx(ANIMALS_HASH_KEY, animal.id, animal)) === 1;
   } catch (error) {

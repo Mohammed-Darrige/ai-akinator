@@ -3,16 +3,26 @@ import {
   ANIMALS,
   QUESTIONS,
   localizedName,
-  traitLikelihood,
+  pYes,
+  traitConfidence,
+  questionFamily,
+  OPENING_BOOK,
   type AnimalProfile,
   type Language,
-} from "./akinator-knowledge-base";
+  type Question,
+  type TraitValue,
+} from "./akinator-kb";
+import {
+  type ConstraintState,
+  propagateConstraints,
+  tierCandidates,
+} from "./akinator-constraints";
+import {
+  type ScoringCandidate,
+  selectBestQuestion,
+  inverseSimpson,
+} from "./akinator-scoring";
 import { getCustomAnimals } from "./db";
-
-type Message = {
-  role: "system" | "user" | "assistant";
-  content: string;
-};
 
 export type Answer = "yes" | "no" | "unknown";
 
@@ -21,28 +31,27 @@ export type Evidence = {
   answer: Answer;
 };
 
-export type ConstraintLedger = {
-  facts: Record<string, boolean>;
-  qa_history: Array<[string, string]>;
-  evidence: Evidence[];
-};
-
 export type GameState = {
-  version: 2;
+  version: 3;
   created_at: number;
   language: Language;
   turn: number;
-  ledger: ConstraintLedger;
-  conversation: Message[];
-  asked_traits: string[];
-  trait_labels: Record<string, string>;
+  directAnswers: Array<{ questionId: string; answer: "yes" | "no" | "unknown" }>;
+  inferredAnswers: Record<string, "yes" | "no">;
+  askedQuestions: string[];
+  familyCounts: Record<string, number>;
+  recentFamilies: [string, string];
+  qaHistory: Array<[string, string]>;
+  mode: "EXPLORE" | "CONFIRM" | "GUESS";
   confidence: number;
-  pending_guess: string | null;
-  last_trait_key: string | null;
-  last_question: string | null;
-  game_over: boolean;
-  awaiting_reveal: boolean;
-  rejected_guesses: string[];
+  pendingGuess: string | null;
+  lastTraitKey: string | null;
+  lastQuestion: string | null;
+  gameOver: boolean;
+  awaitingReveal: boolean;
+  rejectedGuesses: string[];
+  sessionReliability: number;
+  conversation: Array<{ role: string; content: string }>;
 };
 
 export type RankedAnimal = {
@@ -64,11 +73,6 @@ export type EngineTurn = {
   is_contradiction_overload?: boolean;
 };
 
-const ANSWER_RELIABILITY = 0.85;
-const MAX_QUESTIONS = 24;
-const MAX_REJECTED_GUESSES = 4;
-const MAX_TOKEN_BYTES = 48_000;
-
 const ANSWER_LABELS: Record<Language, Record<Answer, string>> = {
   en: { yes: "Yes", no: "No", unknown: "I don't know" },
   tr: { yes: "Evet", no: "Hayır", unknown: "Bilmiyorum" },
@@ -81,34 +85,45 @@ const GIVE_UP_MESSAGES: Record<Language, string> = {
   ar: "لم تعد إجاباتك تدعم تحديدا موثوقا للحيوان. ما الحيوان الذي كنت تفكر فيه؟",
 };
 
-// Compatibility view for reporting and the post-game endpoint. The engine itself
-// uses likelihoods and never treats an omitted trait as a proven negative.
+const MAX_QUESTIONS = 24;
+const MAX_REJECTED_GUESSES = 3;
+const MAX_TOKEN_BYTES = 48_000;
+const INITIAL_SESSION_RELIABILITY = 0.92;
+const CONTRADICTION_PENALTY = 0.08;
+const MIN_SESSION_RELIABILITY = 0.55;
+const MAX_SESSION_RELIABILITY = 0.95;
+
 export const ANIMAL_SIGNATURES = ANIMALS.map((animal) => ({
   id: animal.id,
   name: animal.name,
   traits: Object.fromEntries(
-    QUESTIONS.map((question) => [question.id, traitLikelihood(animal, question.id) >= 0.85]),
+    Object.entries(animal.traits).map(([key, val]) => [key, val === "yes" || val === "likely"])
   ) as Record<string, boolean>,
   priority: animal.prior,
 }));
 
 export function createGameState(language: Language = "en"): GameState {
   return {
-    version: 2,
+    version: 3,
     created_at: Date.now(),
     language,
     turn: 0,
-    ledger: { facts: {}, qa_history: [], evidence: [] },
-    conversation: [],
-    asked_traits: [],
-    trait_labels: {},
+    directAnswers: [],
+    inferredAnswers: {},
+    askedQuestions: [],
+    familyCounts: {},
+    recentFamilies: ["", ""],
+    qaHistory: [],
+    mode: "EXPLORE",
     confidence: 0,
-    pending_guess: null,
-    last_trait_key: null,
-    last_question: null,
-    game_over: false,
-    awaiting_reveal: false,
-    rejected_guesses: [],
+    pendingGuess: null,
+    lastTraitKey: null,
+    lastQuestion: null,
+    gameOver: false,
+    awaitingReveal: false,
+    rejectedGuesses: [],
+    sessionReliability: INITIAL_SESSION_RELIABILITY,
+    conversation: [],
   };
 }
 
@@ -120,9 +135,7 @@ function parseAnswer(value: string): Answer | null {
   const normalized = value.trim().toLocaleLowerCase("tr-TR");
   if (["yes", "evet", "نعم", "اجل", "أجل"].includes(normalized)) return "yes";
   if (["no", "hayır", "hayir", "لا"].includes(normalized)) return "no";
-  if (["unknown", "bilmiyorum", "i don't know", "i dont know", "لا أعرف", "لا اعرف"].includes(normalized)) {
-    return "unknown";
-  }
+  if (["unknown", "bilmiyorum", "i don't know", "i dont know", "لا أعرف", "لا اعرف"].includes(normalized)) return "unknown";
   return null;
 }
 
@@ -160,26 +173,15 @@ function createSessionToken(state: GameState) {
     conversation: state.conversation.slice(-36),
   };
   const payload = Buffer.from(JSON.stringify(compactState)).toString("base64url");
-  return `v2.${payload}.${signature(payload)}`;
+  return `v3.${payload}.${signature(payload)}`;
 }
 
 function isSafeState(value: unknown): value is GameState {
   if (!value || typeof value !== "object") return false;
   const state = value as Partial<GameState>;
-  return state.version === 2
+  return state.version === 3
     && typeof state.created_at === "number"
-    && state.created_at <= Date.now() + 60_000
-    && state.created_at >= Date.now() - 2 * 60 * 60_000
-    && Number.isInteger(state.turn)
-    && (state.turn ?? -1) >= 0
-    && (state.turn ?? 100) <= 40
-    && Array.isArray(state.asked_traits)
-    && state.asked_traits.length <= QUESTIONS.length
-    && Array.isArray(state.rejected_guesses)
-    && state.rejected_guesses.length <= 10
-    && Array.isArray(state.ledger?.evidence)
-    && state.ledger!.evidence.length <= QUESTIONS.length
-    && typeof state.awaiting_reveal === "boolean";
+    && typeof state.turn === "number";
 }
 
 export function readSessionToken(token: string | undefined, language: Language) {
@@ -187,7 +189,7 @@ export function readSessionToken(token: string | undefined, language: Language) 
   if (Buffer.byteLength(token, "utf8") > MAX_TOKEN_BYTES) throw new Error("Session token is too large.");
 
   const [version, payload, suppliedSignature] = token.split(".");
-  if (version !== "v2" || !payload || !suppliedSignature) throw new Error("Session token is invalid.");
+  if (version !== "v3" || !payload || !suppliedSignature) throw new Error("Session token is invalid.");
 
   const expected = Buffer.from(signature(payload));
   const supplied = Buffer.from(suppliedSignature);
@@ -206,211 +208,195 @@ export function readSessionToken(token: string | undefined, language: Language) 
   }
 }
 
-function responseLikelihood(animal: AnimalProfile, evidence: Evidence) {
-  if (evidence.answer === "unknown") return 1;
-  const traitProbability = traitLikelihood(animal, evidence.trait);
-  const reliableProbability = 0.5 + ANSWER_RELIABILITY * (traitProbability - 0.5);
-  return evidence.answer === "yes" ? reliableProbability : 1 - reliableProbability;
+export interface EvidenceItem {
+  questionId: string;
+  answer: "yes" | "no" | "unknown";
+  questionReliability: number;
 }
 
-export function rankAnimals(state: GameState, animals: readonly AnimalProfile[] = ANIMALS): RankedAnimal[] {
-  const rejected = new Set(state.rejected_guesses);
+export function updatePosterior(
+  animals: readonly AnimalProfile[],
+  evidence: readonly EvidenceItem[],
+  familyCounts: Record<string, number>,
+): ScoringCandidate[] {
   const logScores = animals.map((animal) => {
-    let score = Math.log(Math.max(animal.prior, 0.01));
-    for (const evidence of state.ledger.evidence) {
-      score += Math.log(Math.max(responseLikelihood(animal, evidence), 1e-9));
+    let logScore = Math.log(Math.max(animal.prior, 0.01));
+
+    for (const ev of evidence) {
+      if (ev.answer === "unknown") continue;
+
+      const p = pYes(animal, ev.questionId);
+      const confidence = traitConfidence(animal, ev.questionId);
+
+      const reliability = ev.questionReliability * confidence;
+      const adjustedP = 0.5 + reliability * (p - 0.5);
+      const likelihood = ev.answer === "yes" ? adjustedP : 1 - adjustedP;
+
+      const family = questionFamily(ev.questionId);
+      const familyCount = familyCounts[family] ?? 0;
+      const discount = 1 / (1 + 0.4 * familyCount);
+
+      logScore += discount * Math.log(Math.max(likelihood, 1e-12));
     }
-    if (rejected.has(animal.id)) score += Math.log(1e-9);
-    return score;
+
+    return logScore;
   });
-  const maxScore = Math.max(...logScores);
-  const weights = logScores.map((score) => Math.exp(score - maxScore));
-  const total = weights.reduce((sum, weight) => sum + weight, 0);
 
-  return animals
-    .map((animal, index) => ({ animal, probability: weights[index] / total }))
-    .sort((left, right) => right.probability - left.probability);
-}
+  const maxLog = Math.max(...logScores);
+  const weights = logScores.map((s) => Math.exp(s - maxLog));
+  const total = weights.reduce((sum, w) => sum + w, 0);
 
-function entropy(distribution: readonly RankedAnimal[]) {
-  return distribution.reduce(
-    (sum, item) => item.probability > 0 ? sum - item.probability * Math.log2(item.probability) : sum,
-    0,
-  );
-}
-
-function posteriorAfterHypothetical(
-  ranked: readonly RankedAnimal[],
-  trait: string,
-  answer: Exclude<Answer, "unknown">,
-) {
-  const weighted = ranked.map((item) => ({
-    animal: item.animal,
-    probability: item.probability * responseLikelihood(item.animal, { trait, answer }),
+  const result = animals.map((animal, i) => ({
+    animal,
+    probability: weights[i] / total,
   }));
-  const total = weighted.reduce((sum, item) => sum + item.probability, 0);
-  return weighted.map((item) => ({ ...item, probability: item.probability / total }));
+
+  result.sort((a, b) => b.probability - a.probability);
+  return result;
 }
 
-function scoreQuestions(state: GameState, ranked: readonly RankedAnimal[]) {
-  const before = entropy(ranked);
-  const asked = new Set(state.asked_traits);
+export type EngineMode = "EXPLORE" | "CONFIRM" | "GUESS";
 
-  return QUESTIONS
-    .filter((question) => !asked.has(question.id))
-    .map((question) => {
-      const pYes = ranked.reduce(
-        (sum, item) => sum + item.probability * responseLikelihood(item.animal, { trait: question.id, answer: "yes" }),
-        0,
+export function determineMode(
+  candidates: readonly ScoringCandidate[],
+  turn: number,
+  rejectedGuesses: number,
+): EngineMode {
+  if (candidates.length === 0) return "GUESS"; 
+
+  const p1 = candidates[0]?.probability ?? 0;
+  const p2 = candidates[1]?.probability ?? 0;
+  const margin = p1 - p2;
+  const odds = p1 / Math.max(p2, 1e-9);
+  const effective = inverseSimpson(candidates);
+
+  if (p1 >= 0.88 && odds >= 6) return "GUESS";
+  if (p1 >= 0.75 && odds >= 4 && effective <= 2.5) return "GUESS";
+  if (p1 >= 0.62 && odds >= 5 && effective <= 1.8) return "GUESS";
+  if (turn >= 10 && p1 >= 0.55 && margin >= 0.25) return "GUESS";
+  if (turn >= 15 && p1 >= 0.40) return "GUESS";
+
+  if (p1 >= 0.45 && odds >= 2.5) return "CONFIRM";
+  if (effective <= 5 && p1 >= 0.30) return "CONFIRM";
+
+  return "EXPLORE";
+}
+
+export function selectConfirmationQuestion(
+  leader: ScoringCandidate,
+  rivals: readonly ScoringCandidate[],
+  eligibleQuestions: readonly Question[],
+): string | null {
+  const topRivals = rivals.slice(0, 5);
+
+  let bestId: string | null = null;
+  let bestScore = -1;
+
+  for (const q of eligibleQuestions) {
+    let score = 0;
+    for (const rival of topRivals) {
+      const diff = Math.abs(
+        pYes(leader.animal, q.id) - pYes(rival.animal, q.id)
       );
-      const yesPosterior = posteriorAfterHypothetical(ranked, question.id, "yes");
-      const noPosterior = posteriorAfterHypothetical(ranked, question.id, "no");
-      const gain = before - pYes * entropy(yesPosterior) - (1 - pYes) * entropy(noPosterior);
-      const usefulMass = ranked.reduce(
-        (sum, item) => sum + (Math.abs(traitLikelihood(item.animal, question.id) - 0.5) > 0.25 ? item.probability : 0),
-        0,
-      );
-      return {
-        question,
-        pYes,
-        score: gain * question.clarity * usefulMass,
-        gain,
-      };
-    })
-    .sort((left, right) => right.score - left.score);
-}
+      score += rival.probability * diff;
+    }
 
-function effectiveCandidateCount(ranked: readonly RankedAnimal[]) {
-  return 2 ** entropy(ranked);
-}
+    const leaderTrait = leader.animal.traits[q.id];
+    if (leaderTrait === "variable" || leaderTrait === "na") {
+      score *= 0.3; 
+    }
 
-function visibleCandidateCount(ranked: readonly RankedAnimal[]) {
-  const floor = Math.max(0.008, (ranked[0]?.probability ?? 0) * 0.08);
-  return ranked.filter((item) => item.probability >= floor).length;
-}
-
-function shouldGuess(state: GameState, ranked: readonly RankedAnimal[], noQuestionLeft: boolean) {
-  const top = ranked[0]?.probability ?? 0;
-  const second = ranked[1]?.probability ?? 0;
-  const odds = top / Math.max(second, 1e-9);
-  const effective = effectiveCandidateCount(ranked);
-  const usefulAnswers = state.ledger.evidence.filter((item) => item.answer !== "unknown").length;
-
-  if (noQuestionLeft || state.turn >= MAX_QUESTIONS) return top >= 0.2;
-  if (usefulAnswers === 0) return false;
-  if (top >= 0.92 && odds >= 7) return true;
-  if (top >= 0.82 && odds >= 4 && effective <= 2.2) return true;
-  return top >= 0.68 && odds >= 6 && effective <= 1.55;
-}
-
-export function selectNextTurn(
-  state: GameState,
-  animals: readonly AnimalProfile[] = ANIMALS,
-): EngineTurn {
-  const ranked = rankAnimals(state, animals);
-  const questionScores = scoreQuestions(state, ranked);
-  const bestQuestion = questionScores[0];
-  const noQuestionLeft = !bestQuestion;
-  const top = ranked[0];
-  const candidatesRemaining = visibleCandidateCount(ranked);
-
-  if (top && shouldGuess(state, ranked, noQuestionLeft)) {
-    return {
-      action: "guess",
-      question: "",
-      trait_key: "",
-      guess: localizedName(top.animal, state.language),
-      confidence: top.probability,
-      candidates_remaining: candidatesRemaining,
-      db_match_found: true,
-    };
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = q.id;
+    }
   }
 
-  if (!bestQuestion || state.rejected_guesses.length >= MAX_REJECTED_GUESSES) {
-    return {
-      action: "give_up",
-      question: GIVE_UP_MESSAGES[state.language],
-      trait_key: "",
-      guess: "",
-      confidence: top?.probability ?? 0,
-      candidates_remaining: candidatesRemaining,
-      db_match_found: false,
-      is_contradiction_overload: state.ledger.evidence.filter((item) => item.answer !== "unknown").length >= 4,
-    };
+  return bestScore > 0.05 ? bestId : null;
+}
+
+export function findSilverBullet(
+  leader: ScoringCandidate,
+  otherActives: readonly ScoringCandidate[],
+  eligibleQuestions: readonly Question[],
+): string | null {
+  for (const q of eligibleQuestions) {
+    const leaderP = pYes(leader.animal, q.id);
+    if (leaderP < 0.85 && leaderP > 0.15) continue; 
+
+    const leaderSaysYes = leaderP >= 0.85;
+
+    let isBullet = true;
+    for (const other of otherActives) {
+      const otherP = pYes(other.animal, q.id);
+      if (leaderSaysYes && otherP >= 0.40) { isBullet = false; break; }
+      if (!leaderSaysYes && otherP <= 0.60) { isBullet = false; break; }
+    }
+
+    if (isBullet) return q.id;
+  }
+  return null;
+}
+
+export function openingBookQuestion(state: GameState): string | null {
+  if (state.turn === 0) return OPENING_BOOK["start"]?.[0] ?? null;
+
+  if (state.turn === 1 && state.directAnswers.length === 1) {
+    const firstAnswer = state.directAnswers[0];
+    const key = `${firstAnswer.questionId}:${firstAnswer.answer}`;
+    return OPENING_BOOK[key]?.[0] ?? null;
   }
 
-  return {
-    action: "ask_question",
-    question: bestQuestion.question.text[state.language],
-    trait_key: bestQuestion.question.id,
-    guess: "",
-    confidence: top?.probability ?? 0,
-    candidates_remaining: candidatesRemaining,
-    db_match_found: true,
-    split_yes: Math.round(bestQuestion.pYes * candidatesRemaining),
-    split_no: Math.round((1 - bestQuestion.pYes) * candidatesRemaining),
-    information_gain: bestQuestion.gain,
-  };
+  return null; 
 }
 
-export function knownFactValue(facts: Record<string, boolean>, trait: string): boolean | null {
-  return typeof facts[trait] === "boolean" ? facts[trait] : null;
+function detectContradiction(
+  newInferred: Record<string, "yes" | "no">,
+  oldInferred: Record<string, "yes" | "no">,
+): boolean {
+  for (const [key, value] of Object.entries(newInferred)) {
+    if (oldInferred[key] && oldInferred[key] !== value) return true;
+  }
+  return false;
 }
 
-export function recordAnswer(state: GameState, answer: boolean | null | Answer) {
-  const normalized: Answer = typeof answer === "string" ? answer : answer === true ? "yes" : answer === false ? "no" : "unknown";
-  if (!state.last_trait_key) return;
-
-  state.ledger.evidence.push({ trait: state.last_trait_key, answer: normalized });
-  if (normalized !== "unknown") state.ledger.facts[state.last_trait_key] = normalized === "yes";
-  const label = ANSWER_LABELS[state.language][normalized];
-  state.ledger.qa_history.push([state.last_question || state.last_trait_key, label]);
-  state.trait_labels[state.last_trait_key] = state.last_question || state.last_trait_key;
-  state.conversation.push({ role: "user", content: label });
-  state.turn += 1;
-}
-
-export function tryGenerateLocalTurn(state: GameState, _forceGuess = false): EngineTurn {
-  void _forceGuess;
-  return selectNextTurn(state);
-}
-
-function applyTurnToState(state: GameState, turn: EngineTurn, animals: readonly AnimalProfile[]) {
-  state.confidence = turn.confidence;
-  state.conversation.push({ role: "assistant", content: JSON.stringify(turn) });
-  if (turn.action === "ask_question") {
-    state.last_question = turn.question;
-    state.last_trait_key = turn.trait_key;
-    state.asked_traits.push(turn.trait_key);
-  } else if (turn.action === "guess") {
-    const guessedAnimal = rankAnimals(state, animals)[0]?.animal;
-    state.pending_guess = guessedAnimal?.id ?? null;
+function updateSessionReliability(state: GameState, hadContradiction: boolean): void {
+  if (hadContradiction) {
+    state.sessionReliability = Math.max(
+      MIN_SESSION_RELIABILITY,
+      state.sessionReliability - CONTRADICTION_PENALTY,
+    );
   } else {
-    state.game_over = true;
-    state.awaiting_reveal = true;
-    state.last_trait_key = null;
-    state.last_question = null;
+    state.sessionReliability = Math.min(
+      MAX_SESSION_RELIABILITY,
+      state.sessionReliability + 0.01,
+    );
   }
+}
+
+async function runtimeCatalog(): Promise<AnimalProfile[]> {
+  const customAnimals = await getCustomAnimals();
+  if (customAnimals.length === 0) return ANIMALS as unknown as AnimalProfile[];
+  const builtInIds = new Set(ANIMALS.map((animal) => animal.id));
+  const approvedProfiles: AnimalProfile[] = customAnimals
+    .filter((animal) => !builtInIds.has(animal.id))
+    .map((animal) => {
+      const traits: Record<string, TraitValue> = {};
+      for (const q of QUESTIONS) {
+        traits[q.id] = animal.traits[q.id] ? "yes" : "no";
+      }
+      return {
+        id: animal.id,
+        name: animal.name,
+        traits,
+        prior: 0.35,
+      };
+    });
+  return [...ANIMALS, ...approvedProfiles];
 }
 
 function sse(value: Record<string, unknown>) {
   return `data: ${JSON.stringify(value)}\n\n`;
-}
-
-async function runtimeCatalog() {
-  const customAnimals = await getCustomAnimals();
-  if (customAnimals.length === 0) return ANIMALS;
-  const builtInIds = new Set(ANIMALS.map((animal) => animal.id));
-  const approvedProfiles: AnimalProfile[] = customAnimals
-    .filter((animal) => !builtInIds.has(animal.id))
-    .map((animal) => ({
-      id: animal.id,
-      name: animal.name,
-      tags: new Set(Object.entries(animal.traits).filter(([, value]) => value).map(([trait]) => trait)),
-      uncertainTags: new Set<string>(),
-      prior: 0.35,
-    }));
-  return [...ANIMALS, ...approvedProfiles];
 }
 
 export async function* processAkinatorTurn(
@@ -427,7 +413,7 @@ export async function* processAkinatorTurn(
     return;
   }
 
-  if (state.game_over) {
+  if (state.gameOver) {
     yield sse({ type: "error", content: "This session is already complete. Start a new game." });
     return;
   }
@@ -441,16 +427,16 @@ export async function* processAkinatorTurn(
       return;
     }
 
-    if (state.pending_guess) {
+    if (state.pendingGuess) {
       if (answer === "unknown") {
         yield sse({ type: "error", content: "Please confirm the guess with yes or no." });
         return;
       }
       if (answer === "yes") {
-        const animal = animals.find((candidate) => candidate.id === state.pending_guess);
-        state.game_over = true;
-        state.awaiting_reveal = false;
-        state.pending_guess = null;
+        const animal = animals.find((candidate) => candidate.id === state.pendingGuess);
+        state.gameOver = true;
+        state.awaitingReveal = false;
+        state.pendingGuess = null;
         yield sse({ type: "session_id", session_id: createSessionToken(state) });
         yield sse({
           type: "result",
@@ -460,16 +446,155 @@ export async function* processAkinatorTurn(
         });
         return;
       }
-      if (!state.rejected_guesses.includes(state.pending_guess)) state.rejected_guesses.push(state.pending_guess);
-      state.pending_guess = null;
+      if (!state.rejectedGuesses.includes(state.pendingGuess)) {
+        state.rejectedGuesses.push(state.pendingGuess);
+      }
+      state.pendingGuess = null;
       state.turn += 1;
     } else {
-      recordAnswer(state, answer);
+      if (state.lastTraitKey) {
+        state.directAnswers.push({ questionId: state.lastTraitKey, answer });
+        const label = ANSWER_LABELS[state.language][answer];
+        state.qaHistory.push([state.lastQuestion || state.lastTraitKey, label]);
+        state.conversation.push({ role: "user", content: label });
+        
+        if (answer !== "unknown") {
+          const oldInferred = { ...state.inferredAnswers };
+          const cState: ConstraintState = { inferred: state.inferredAnswers, eligible: {} };
+          const newState = propagateConstraints(state.lastTraitKey, answer, cState);
+          state.inferredAnswers = newState.inferred;
+          const hadContradiction = detectContradiction(newState.inferred, oldInferred);
+          updateSessionReliability(state, hadContradiction);
+        }
+        
+        state.turn += 1;
+      }
     }
   }
 
-  const turn = selectNextTurn(state, animals);
-  applyTurnToState(state, turn, animals);
+  const evidence: EvidenceItem[] = [];
+  for (const da of state.directAnswers) {
+    const q = QUESTIONS.find(q => q.id === da.questionId);
+    evidence.push({
+      questionId: da.questionId,
+      answer: da.answer,
+      questionReliability: q ? (q.phase === "broad" ? 0.95 : 0.90) : 0.90,
+    });
+  }
+  for (const [qId, ans] of Object.entries(state.inferredAnswers)) {
+    if (!state.directAnswers.find(da => da.questionId === qId)) {
+      evidence.push({
+        questionId: qId,
+        answer: ans,
+        questionReliability: 0.98,
+      });
+    }
+  }
+
+  const posterior = updatePosterior(animals, evidence, state.familyCounts);
+  
+  const cState: ConstraintState = { inferred: state.inferredAnswers, eligible: {} };
+  const tiered = tierCandidates(animals, state.directAnswers, cState);
+  
+  let activeCandidates = posterior.filter(p => {
+    const t = tiered.find(t => animals[t.animalIndex].id === p.animal.id);
+    return t && t.tier === "active";
+  });
+  
+  if (activeCandidates.length <= 2) {
+    const rescueCandidates = posterior.filter(p => {
+      const t = tiered.find(t => animals[t.animalIndex].id === p.animal.id);
+      return t && t.tier === "rescue";
+    });
+    activeCandidates = [...activeCandidates, ...rescueCandidates].sort((a, b) => b.probability - a.probability);
+  }
+  
+  if (activeCandidates.length === 0) {
+    activeCandidates = posterior;
+  }
+
+  state.mode = determineMode(activeCandidates, state.turn, state.rejectedGuesses.length);
+  const candidatesRemaining = activeCandidates.length;
+
+  let turnResult: EngineTurn;
+  const top = activeCandidates[0];
+
+  if (state.mode === "GUESS" && top && state.rejectedGuesses.length < MAX_REJECTED_GUESSES) {
+    turnResult = {
+      action: "guess",
+      question: "",
+      trait_key: "",
+      guess: localizedName(top.animal, state.language),
+      confidence: top.probability,
+      candidates_remaining: candidatesRemaining,
+      db_match_found: true,
+    };
+  } else {
+    let nextQuestionId: string | null = null;
+
+    if (state.mode === "CONFIRM" && activeCandidates.length > 1) {
+      nextQuestionId = findSilverBullet(top, activeCandidates.slice(1), QUESTIONS.filter(q => !state.askedQuestions.includes(q.id) && !state.inferredAnswers[q.id]));
+      if (!nextQuestionId) {
+        nextQuestionId = selectConfirmationQuestion(top, activeCandidates.slice(1), QUESTIONS.filter(q => !state.askedQuestions.includes(q.id) && !state.inferredAnswers[q.id]));
+      }
+    }
+    
+    if (!nextQuestionId) {
+      nextQuestionId = openingBookQuestion(state);
+    }
+    
+    if (!nextQuestionId) {
+      const eligible = QUESTIONS.filter(q => !state.askedQuestions.includes(q.id) && !state.inferredAnswers[q.id]);
+      if (eligible.length > 0) {
+        nextQuestionId = selectBestQuestion(activeCandidates, eligible, state.familyCounts, state.recentFamilies);
+      }
+    }
+
+    if (!nextQuestionId || state.turn >= MAX_QUESTIONS || state.rejectedGuesses.length >= MAX_REJECTED_GUESSES) {
+      turnResult = {
+        action: "give_up",
+        question: GIVE_UP_MESSAGES[state.language],
+        trait_key: "",
+        guess: "",
+        confidence: top?.probability ?? 0,
+        candidates_remaining: candidatesRemaining,
+        db_match_found: false,
+        is_contradiction_overload: state.sessionReliability < 0.6,
+      };
+    } else {
+      const q = QUESTIONS.find(q => q.id === nextQuestionId);
+      turnResult = {
+        action: "ask_question",
+        question: q!.text[state.language],
+        trait_key: q!.id,
+        guess: "",
+        confidence: top?.probability ?? 0,
+        candidates_remaining: candidatesRemaining,
+        db_match_found: true,
+      };
+    }
+  }
+
+  state.confidence = turnResult.confidence;
+  state.conversation.push({ role: "assistant", content: JSON.stringify(turnResult) });
+  
+  if (turnResult.action === "ask_question") {
+    state.lastQuestion = turnResult.question;
+    state.lastTraitKey = turnResult.trait_key;
+    state.askedQuestions.push(turnResult.trait_key);
+    
+    const family = questionFamily(turnResult.trait_key);
+    state.familyCounts[family] = (state.familyCounts[family] || 0) + 1;
+    state.recentFamilies = [family, state.recentFamilies[0]];
+  } else if (turnResult.action === "guess") {
+    state.pendingGuess = top?.animal.id ?? null;
+  } else {
+    state.gameOver = true;
+    state.awaitingReveal = true;
+    state.lastTraitKey = null;
+    state.lastQuestion = null;
+  }
+
   yield sse({ type: "session_id", session_id: createSessionToken(state) });
-  yield sse({ type: "result", ...turn, turn: state.turn });
+  yield sse({ type: "result", ...turnResult, turn: state.turn });
 }
