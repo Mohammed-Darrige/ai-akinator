@@ -2425,7 +2425,7 @@ export const ANIMALS: readonly AnimalProfile[] = [
   },
   {
     id: "blue-whale",
-    name: { en: "blue whale", tr: "mavi balina", ar: "حوت أزرق" },
+    name: { en: "whale", tr: "balina", ar: "حوت أزرق" },
     traits: {
       mammal: "yes", bird: "no", reptile: "no", amphibian: "no",
       fish: "no", insect: "no", arachnid: "no", mollusk: "no",
@@ -2995,31 +2995,7 @@ export const ANIMALS: readonly AnimalProfile[] = [
     },
     prior: 1,
   },
-  {
-    id: "alligator",
-    name: { en: "alligator", tr: "aligator", ar: "قاطع" },
-    traits: {
-      mammal: "no", bird: "no", reptile: "yes", amphibian: "no",
-      fish: "no", insect: "no", arachnid: "no", mollusk: "no",
-      crustacean: "no", extinct: "no", mainly_aquatic: "no", marine: "no",
-      freshwater: "yes", semi_aquatic: "yes", flies: "no", flightless_bird: "na",
-      arboreal: "no", burrows: "no", domesticated: "no", farm_animal: "no",
-      predator: "yes", herbivore: "no", omnivore: "no", tiny: "no",
-      large: "yes", gigantic: "no", fur: "no", feathers: "no",
-      scales: "yes", shell: "no", exoskeleton: "no", no_legs: "no",
-      two_legs: "no", four_legs: "yes", six_legs: "no", eight_legs: "no",
-      webbed_feet: "no", hooves: "na", horns: "no", antlers: "na",
-      trunk: "na", long_neck: "no", pouch: "na", spines: "no",
-      stripes: "no", spots: "no", black_white: "no", venomous: "no",
-      tentacles: "no", claws: "no", color_change: "no", echolocation: "na",
-      lays_eggs: "yes", marsupial: "na", primate: "na", rodent: "na",
-      cat_family: "na", canine_family: "na", bear_family: "na", whale_family: "na",
-      ape: "na", long_ears: "na", hump: "no", tusks: "na",
-      reddish_fur: "no", long_narrow_snout: "no", palmate_antlers: "na", rat_sized_rodent: "na",
-      slow: "no", bioluminescent: "no", regenerates_limbs: "no", electric: "no",
-      filter_feeder: "no",
-    },
-    prior: 1,
+  prior: 1,
   },
   {
     id: "snake",
@@ -4141,7 +4117,7 @@ export const ANIMALS: readonly AnimalProfile[] = [
   },
   {
     id: "woolly-mammoth",
-    name: { en: "woolly mammoth", tr: "yünlü mamut", ar: "ماموث صوفي" },
+    name: { en: "mammoth", tr: "mamut", ar: "ماموث صوفي" },
     traits: {
       mammal: "yes", bird: "no", reptile: "no", amphibian: "no",
       fish: "no", insect: "no", arachnid: "no", mollusk: "no",
