@@ -1,3 +1,5 @@
+> Historical pre-v4 report. Its catalogue, noise-recovery behavior and performance numbers do not describe the current engine. Preserved for provenance; use npm run evaluate for current synthetic measurements.
+
 # AI Akinator Five-Animal Evaluation
 
 Date: 2026-07-29

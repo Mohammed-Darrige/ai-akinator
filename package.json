@@ -1,8 +1,8 @@
 {
   "name": "neural-akinator",
-  "version": "2.0.0",
+  "version": "4.0.0",
   "private": false,
-  "description": "Noise-tolerant Bayesian animal deduction engine with expected-information-gain question selection.",
+  "description": "Deterministic animal deduction with strict direct-answer constraints and bounded lookahead question selection.",
   "type": "module",
   "scripts": {
     "test": "vitest run",

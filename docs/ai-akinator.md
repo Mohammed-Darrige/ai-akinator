@@ -1,50 +1,30 @@
-# AI Akinator Engine
+# AI Akinator v4 architecture
 
-## Scope
+The built-in catalogue contains 110 recognizable living-animal targets and 90 canonical localized questions. It is a bounded game vocabulary, not an exhaustive animal inventory. See the provenance document for narrower target meanings, removed targets, sources, and unresolved variability.
 
-The engine identifies real living or extinct animals only. Plants, fungi, objects, people, fictional characters, and mythical creatures are outside the domain.
+## Direct-answer inference
 
-## Modules
+1. Start with uniform positive priors over the built-in catalogue.
+2. Remove candidates whose categorical yes/no trait is opposite a direct answer. No rescue or inferred-taxonomy cascade restores them.
+3. Multiply remaining weights by direct-answer likelihoods and normalize. Hard yes/no uses 1/0; likely/unlikely uses 0.78/0.22; variable, not-applicable and missing values use 0.5.
+4. Unknown performs no probability update. It records the question so the same question cannot repeat.
 
-- `src/lib/server/akinator-knowledge-base.ts`: canonical multilingual questions and curated animal profiles.
-- `src/lib/server/akinator-engine.ts`: posterior inference, question policy, guess policy, and signed session state.
-- `src/lib/server/akinator-open-world.ts`: optional provider adapter for post-game unknown-animal review.
-- `src/lib/server/db.ts`: approved and pending custom profiles in Upstash Redis.
-- `src/app/api/v1/start/route.ts` and `src/app/api/v1/ask/route.ts`: SSE transport.
-- `src/app/api/v1/akinator/post-game/route.ts`: isolated open-world review flow.
+The compatibility pYes helper retains its historical soft mapping; the active engine and selector share answerLikelihood instead. Only direct observations are retained in the legacy inferredAnswers field. Biological uncertainty is not a player error.
 
-## Inference Model
+## Question and guess policy
 
-The game starts with a normalized prior over the catalog. For each canonical answer, the engine updates every candidate using Bayes' rule:
+The selector computes expected entropy reduction, ambiguity/clarity penalties and bounded family repetition penalties for eligible questions. A six-question shortlist receives a real second-question expected information-gain term. Near-equal utilities are ordered with a seed stored in the session. This is bounded depth-2 utility lookahead, not globally optimal total-question planning. DEFAULT_POLICY in the scoring module is the configuration authority; the evaluator compares it against alternatives.
 
-`P(animal | answers) proportional to P(animal) * product(P(answer | animal))`
+Exactly one compatible candidate permits a guess. More than one candidate requires further information; zero candidates produces no_match. Limits are 24 answered factual questions and three rejected guesses. Other terminal reasons are question_limit, guess_limit, and no_questions. A catalogue-relative posterior is not the probability that the intended animal exists in the catalogue.
 
-Trait values are likelihoods rather than hard filters. Confirmed traits use `0.97`, confirmed negatives use `0.03`, and biologically variable traits use `0.68`. A calibrated `0.85` response-reliability channel prevents one mistaken human answer from reducing the correct animal to zero probability. `unknown` records the question but does not alter the posterior.
+## Sessions and adapters
 
-## Question Policy
+Sessions are version 4 HMAC-SHA256 tokens with a dedicated secret, timing-safe signature checks, bounded shape/collections, two-hour lifetime, and catalogue revision binding. A changed runtime catalogue requires a new game. Current v4 tokens are not interchangeable with historical v3 tokens.
 
-Every question has one canonical trait ID and synchronized English, Turkish, and Arabic text. On each turn the engine evaluates every unasked question and selects the largest expected entropy reduction:
+The db adapter loads validated APPROVED records; the engine additionally requires complete boolean coverage of all current questions before a custom profile becomes playable. Partial submissions can remain in moderation without becoming negative-filled profiles. Approval requires complete current-question coverage, and the profile editing helper lets moderation supply missing boolean traits before approval. Hash-based writes preserve individual records; a legacy array is read for migration. Without configured storage, the built-in catalogue works locally.
 
-`IG = H(A) - P(yes)H(A | yes) - P(no)H(A | no)`
-
-The score also accounts for question clarity and useful posterior coverage. Canonical IDs make semantic duplicates impossible without multilingual regex or LLM validation. Low information gain alone never forces a low-confidence guess; while canonical questions remain, the engine continues gathering evidence until a normal posterior threshold or the hard safety limit is reached.
-
-## Guess Policy
-
-There is no fixed minimum question count. Guessing depends on posterior probability, top-two odds, and effective candidate count (`2^entropy`). Rejected guesses receive negligible posterior mass and cannot repeat. The engine asks at most 24 factual questions and permits at most four rejected guesses before requesting the answer.
-
-## Open World
-
-The live turn loop never calls an LLM. Unknown animals can be submitted after a game. The optional provider adapter validates Animalia scope and emits only canonical trait IDs. New profiles enter `PENDING_REVIEW`; only `APPROVED` profiles are loaded into the runtime catalog.
-
-## Security
-
-- Answers are parsed to `yes`, `no`, or `unknown` before inference.
-- Stateless session payloads use HMAC-SHA256 and constant-time signature comparison.
-- Session shape, turn counts, collection sizes, and payload bytes are bounded.
-- Claimed post-game names are length-limited and passed to the provider as untrusted JSON data.
-- `AKINATOR_SESSION_SECRET` must contain at least 32 characters.
+The optional open-world module calls configured providers only when invoked by a separate post-game integration. This mirror has no HTTP route layer and does not claim to implement application-level authorization or moderation UI. Ordinary inference and the evaluator do not call providers. The shared akinator-scope module applies the product name exclusions to built-in/community integration. Its finite name list is a scope guard, not biological entity verification. Post-game replay claims can bind to a validated canonical game ID. No probabilistic open-set animal detector is implemented.
 
 ## Verification
 
-`npm test` simulates every catalog animal, difficult targets, contradictory evidence, duplicate-question prevention, and noisy answers. Release checks are `npm run lint` and `npm run build`.
+Run npm test and npm run typecheck. Run npm run evaluate for in-sample catalogue coverage and local policy timings; --optimize compares configured lookahead alternatives. Unknown or variable answers are simulated conventions, not measured human behavior. Correctness under source-data mistakes, real answer uncertainty, or unseen targets requires separate evaluation.

@@ -1,0 +1,46 @@
+{
+  "catalogSize": 110,
+  "questionCount": 90,
+  "seeds": [
+    0,
+    17,
+    71
+  ],
+  "provenance": "Synthetic answers from current catalog; policy comparisons are in-sample engineering measurements, not independent biological accuracy or human performance.",
+  "policies": [
+    {
+      "name": "current",
+      "options": {
+        "lookahead": 0.5,
+        "ambiguity": 0.25,
+        "repetition": 0.025,
+        "variety": 0.035
+      },
+      "elapsedMs": 27095.4747,
+      "scenarios": [
+        {
+          "unknownCount": 0,
+          "total": 330,
+          "success": 330,
+          "mean": 7.112121212121212,
+          "p90": 8,
+          "max": 11,
+          "failures": []
+        },
+        {
+          "unknownCount": 2,
+          "total": 330,
+          "success": 330,
+          "mean": 9.3,
+          "p90": 10,
+          "max": 15,
+          "failures": []
+        }
+      ],
+      "selectorTiming": {
+        "meanMs": 4.962491580502197,
+        "p90Ms": 15.611000000000786
+      }
+    }
+  ]
+}

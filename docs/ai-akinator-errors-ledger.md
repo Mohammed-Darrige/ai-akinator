@@ -1,34 +1,29 @@
-# AI Akinator Error Ledger
+# Akinator v4 controls and remaining limits
 
-## Retired Architecture
+Updated 2026-11-17. This document supersedes the historical noise-tolerant/rescue descriptions.
 
-The July 2026 rebuild removed the 2,848-line mixed-responsibility engine. The retired design combined sparse booleans, regex synonym matching, hard exclusions, prompt-authored questions, provider failover, guessed confidence formulas, and session handling in one module.
+| Previous issue | Current control |
+| --- | --- |
+| Derived traits counted as independent evidence | Direct observations only; no implication-based posterior evidence |
+| Tier filtering left unnormalized probability mass | A single compatible pool is normalized after direct-answer likelihood updates |
+| Single user error silently rescued | Explicit strict semantics: hard contradictions exclude; uncertainty stays compatible |
+| Advertised second-step score was unused | A real branch-weighted second-question information-gain term participates in selection |
+| Unknown retroactively discounted prior evidence | Unknown is an exact posterior no-op |
+| Stale duplicate root engines | Compatibility reexports of the canonical src/lib/server modules |
+| Unsupported catalogue benchmarks | Pure evaluator states its synthetic, in-sample answer provenance |
+| Corrupt new localized strings | Tests check localized question text and catalogue consistency |
 
-## Closed Defects
+## Deliberate limits
 
-| Defect | Root cause | Current control |
-| --- | --- | --- |
-| Correct animal eliminated after one bad answer | Hard boolean filtering | Noise-tolerant likelihood updates; posterior mass never becomes zero |
-| Missing trait interpreted inconsistently | Sparse ad hoc signatures | Canonical question catalog and explicit per-profile likelihood |
-| Repeated or compound questions | LLM text generation and synonym regex | One canonical ID and curated localized text per atomic question |
-| Arbitrary confidence percentages | Match-count heuristic | Normalized Bayesian posterior |
-| Weak question ordering | Trait vote heuristic | Expected Shannon entropy reduction over the current posterior |
-| Premature or delayed guesses | Fixed turn/confidence gates | Posterior, odds ratio, and effective-candidate policy |
-| Game failure during provider outage | LLM in the turn loop | Provider-independent local inference |
-| Same wrong guess repeated | Guess stored only as text | Rejected canonical IDs receive negligible prior mass |
-| Prompt injection through answers | Free text forwarded to provider | Strict answer enum; no turn-time provider call |
-| Session token abuse | Weak shape validation | HMAC-SHA256, constant-time comparison, byte and collection bounds |
-| Unreviewed learned profiles active immediately | Missing moderation boundary | `PENDING_REVIEW` storage; runtime loads only `APPROVED` records |
+- A wrong categorical answer can eliminate the correct target; this is the requested product policy, not noise recovery.
+- The 110 targets are curated living-animal game categories. Broad labels and biological variation remain simplifications; every inherited trait has not been independently sourced.
+- At least one encoded hard discriminator per pair does not guarantee a human knows it or the policy reaches it within 24 questions.
+- Unknown consumes a question, and the current selector models yes/no branches rather than a calibrated human unknown channel.
+- Uniform priors are an engineering baseline, not measured target popularity.
+- High relative posterior is not out-of-catalogue detection. No-match and give-up are explicit terminal outcomes, not scientific species verification.
+- Storage-free limits/claims are per process; multi-instance deployments need shared infrastructure and application-level controls.
+- Optional providers and Redis moderation are integrations with availability and operational constraints; local tests/evaluation do not verify live credentials or real external services.
 
-## Known Limits
+## Local checks
 
-- The built-in catalog contains 115 curated profiles, not every animal species. Approved custom profiles are the expansion path.
-- Some colloquial answers remain biologically ambiguous. The `unknown` response is preferable when the question does not fit the user's intended species or individual.
-- Runtime custom-profile updates currently use an array-backed Redis record. A high-volume moderation system should move to per-profile keys plus an index to avoid concurrent write races.
-- Post-game unknown-animal verification is optional and depends on configured provider quota. Provider absence returns `AMBIGUOUS_REVIEW_REQUIRED` without interrupting the game.
-
-## Regression Gate
-
-- `npm test`: all-catalog simulation, hard targets, one-wrong-plus-unknown noise case, posterior normalization, data invariants.
-- `npm run lint`: static quality check.
-- `npm run build`: Next.js production compile, TypeScript, and route generation.
+npm test, npm run typecheck, npm run evaluate. This standalone package does not provide Next.js lint/build commands. No live deployment or public release is implied by the v4 metadata.
