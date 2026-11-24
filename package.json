@@ -1,5 +1,5 @@
 {
-  "name": "neural-akinator",
+  "name": "deterministic-akinator",
   "version": "4.0.0",
   "private": false,
   "description": "Deterministic animal deduction with strict direct-answer constraints and bounded lookahead question selection.",
